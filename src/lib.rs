@@ -210,3 +210,8 @@ pub(crate) fn inflate_zlib(data: &[u8]) -> Result<Vec<u8>> {
     }
     Ok(out)
 }
+
+/// Read a little-endian u32 at `at`, if in bounds.
+pub(crate) fn le32(data: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?))
+}
