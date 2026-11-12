@@ -13,6 +13,7 @@ mod heif;
 mod iptc;
 mod jpeg;
 mod office;
+mod office_content;
 mod pdf;
 mod png;
 pub mod report;

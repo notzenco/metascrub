@@ -88,17 +88,13 @@ fn clean_docx_strips_properties_images_and_timestamps() {
             "{name} keeps a timestamp"
         );
     }
-    let document = |e: &[(String, Vec<u8>, zip::DateTime)]| {
-        e.iter()
-            .find(|(n, _, _)| n == "word/document.xml")
-            .unwrap()
-            .1
-            .clone()
+    let part = |e: &[(String, Vec<u8>, zip::DateTime)], name: &str| {
+        e.iter().find(|(n, _, _)| n == name).unwrap().1.clone()
     };
     assert_eq!(
-        document(&original),
-        document(&cleaned),
-        "document body is untouched"
+        part(&original, "[Content_Types].xml"),
+        part(&cleaned, "[Content_Types].xml"),
+        "parts without metadata are untouched"
     );
 
     for label in [
@@ -123,4 +119,94 @@ fn clean_xlsx_and_pptx() {
             assert!(markers_in(&content).is_empty(), "{name} {entry}");
         }
     }
+}
+
+fn part(data: &[u8], name: &str) -> String {
+    let entry = entries(data).into_iter().find(|(n, _, _)| n == name);
+    String::from_utf8(entry.unwrap_or_else(|| panic!("no {name}")).1).unwrap()
+}
+
+fn content_fields(inspection: &metascrub::Inspection, part: &str) -> Vec<(String, String)> {
+    inspection
+        .fields
+        .iter()
+        .filter(|f| f.group == part)
+        .map(|f| (f.name.clone(), f.value.clone()))
+        .collect()
+}
+
+#[test]
+fn inspect_reports_people_inside_document_content() {
+    let (_, docx) = metascrub::inspect(&fixture("memo.docx")).unwrap();
+    let comments = content_fields(&docx, "word/comments.xml");
+    assert!(
+        comments.contains(&("CommentAuthor".into(), "Jane Example".into())),
+        "{comments:?}"
+    );
+    assert!(comments.contains(&("CommentDate".into(), "2019-07-14T10:30:00Z".into())));
+    let body = content_fields(&docx, "word/document.xml");
+    assert!(
+        body.contains(&("RevisionAuthor".into(), "Jane Example".into())),
+        "{body:?}"
+    );
+    assert!(
+        body.contains(&("RevisionSessionIDs".into(), "2 IDs".into())),
+        "{body:?}"
+    );
+    let people = content_fields(&docx, "word/people.xml");
+    assert!(
+        people.contains(&("PersonUserId".into(), "jane@ExampleCorp.com".into())),
+        "{people:?}"
+    );
+    assert_eq!(
+        field(&docx, "CommentAuthor").category,
+        Some(Category::Identity)
+    );
+
+    let (_, xlsx) = metascrub::inspect(&fixture("budget.xlsx")).unwrap();
+    assert_eq!(
+        field(&xlsx, "SavedPath").value,
+        r"C:\Users\Jane Example\Documents\"
+    );
+    assert_eq!(field(&xlsx, "SavedPath").category, Some(Category::Identity));
+    assert_eq!(field(&xlsx, "CommentAuthor").value, "Jane Example");
+    assert_eq!(field(&xlsx, "PersonName").value, "Jane Example");
+
+    let (_, pptx) = metascrub::inspect(&fixture("deck.pptx")).unwrap();
+    assert_eq!(field(&pptx, "CommentAuthor").value, "Jane Example");
+    assert_eq!(field(&pptx, "CommentDate").category, Some(Category::Time));
+}
+
+#[test]
+fn clean_anonymises_authors_but_keeps_comments_and_revisions() {
+    let docx = metascrub::clean(&fixture("memo.docx")).unwrap().data;
+    let body = part(&docx, "word/document.xml");
+    assert!(body.contains("<w:t>Quarterly plan</w:t>"), "{body}");
+    assert!(
+        body.contains(r#"<w:ins w:id="1" w:author="Author">"#),
+        "{body}"
+    );
+    assert!(!body.contains("rsid"), "{body}");
+    let comments = part(&docx, "word/comments.xml");
+    assert!(comments.contains(r#"w:author="Author""#), "{comments}");
+    assert!(comments.contains("Check the figures"), "{comments}");
+    assert!(!comments.contains("w:date"), "{comments}");
+    assert!(!part(&docx, "word/settings.xml").contains("rsid"));
+
+    let xlsx = metascrub::clean(&fixture("budget.xlsx")).unwrap().data;
+    let notes = part(&xlsx, "xl/comments1.xml");
+    assert!(notes.contains("<author>Author</author>"), "{notes}");
+    assert!(notes.contains("<t>Author:</t>"), "{notes}");
+    assert!(notes.contains("Check this total"), "{notes}");
+    assert!(part(&xlsx, "xl/workbook.xml").contains(r#"url="""#));
+
+    let pptx = metascrub::clean(&fixture("deck.pptx")).unwrap().data;
+    let authors = part(&pptx, "ppt/commentAuthors.xml");
+    assert!(
+        authors.contains(r#"name="Author" initials="A""#),
+        "{authors}"
+    );
+    let slide_comments = part(&pptx, "ppt/comments/comment1.xml");
+    assert!(!slide_comments.contains("dt="), "{slide_comments}");
+    assert!(slide_comments.contains("Tighten this title"));
 }

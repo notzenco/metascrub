@@ -1,7 +1,7 @@
 //! XMP packets (RDF/XML), as embedded in images and PDFs.
 
 use quick_xml::Reader;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesRef, BytesStart, Event};
 
 use crate::Field;
 
@@ -31,20 +31,7 @@ pub fn parse(packet: &[u8]) -> Vec<Field> {
             Ok(Event::Empty(e)) => attributes(&e, &stack, &mut fields),
             Ok(Event::Text(t)) => append(&mut stack, &t.xml10_content()),
             Ok(Event::CData(t)) => append(&mut stack, &t),
-            Ok(Event::GeneralRef(r)) => {
-                let resolved = match r.resolve_char_ref() {
-                    Ok(Some(c)) => c.to_string(),
-                    _ => match &*r {
-                        "amp" => "&".into(),
-                        "lt" => "<".into(),
-                        "gt" => ">".into(),
-                        "quot" => "\"".into(),
-                        "apos" => "'".into(),
-                        _ => String::new(),
-                    },
-                };
-                append(&mut stack, &resolved);
-            }
+            Ok(Event::GeneralRef(r)) => append(&mut stack, &resolve_ref(&r)),
             Ok(Event::End(e)) => {
                 let Some((property, text)) = stack.pop() else {
                     break;
@@ -67,6 +54,21 @@ pub fn parse(packet: &[u8]) -> Vec<Field> {
         }
     }
     fields
+}
+
+/// Resolve an entity or character reference; unknown entities become empty.
+pub(crate) fn resolve_ref(r: &BytesRef) -> String {
+    match r.resolve_char_ref() {
+        Ok(Some(c)) => c.to_string(),
+        _ => match &**r {
+            "amp" => "&".into(),
+            "lt" => "<".into(),
+            "gt" => ">".into(),
+            "quot" => "\"".into(),
+            "apos" => "'".into(),
+            _ => String::new(),
+        },
+    }
 }
 
 fn qname(e: &BytesStart) -> String {

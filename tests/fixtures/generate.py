@@ -358,18 +358,81 @@ def write_zip(parts):
     return buf.getvalue()
 
 
+W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+R_NS = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+USER_ID = "jane@ExampleCorp.com"
+
+
+def rels(*targets):
+    body = "".join(
+        f'<Relationship Id="rId{i}" Type="{kind}" Target="{target}"/>'
+        for i, (kind, target) in enumerate(targets, start=1)
+    )
+    return (
+        XML_HEAD
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + body
+        + "</Relationships>"
+    )
+
+
+def override(part, content_type):
+    return f'<Override PartName="/{part}" ContentType="{content_type}"/>'
+
+
 def make_docx(jpeg):
-    document = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Quarterly plan</w:t></w:r></w:p></w:body></w:document>"""
-    doc_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.jpeg"/></Relationships>"""
-    main = '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    # Revision session IDs (rsid), a tracked insertion and a comment all
+    # record who edited the document and when.
+    document = (
+        XML_HEAD
+        + f"<w:document {W_NS}><w:body>"
+        + '<w:p w:rsidR="00A1B2C3" w:rsidRDefault="00A1B2C3">'
+        + '<w:commentRangeStart w:id="0"/><w:r w:rsidR="00D4E5F6"><w:t>Quarterly plan</w:t></w:r>'
+        + f'<w:ins w:id="1" w:author="{ARTIST}" w:date="{DATE_ISO}"><w:r><w:t xml:space="preserve"> and budget</w:t></w:r></w:ins>'
+        + '<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r>'
+        + "</w:p></w:body></w:document>"
+    )
+    comments = (
+        XML_HEAD
+        + f"<w:comments {W_NS}>"
+        + f'<w:comment w:id="0" w:author="{ARTIST}" w:date="{DATE_ISO}" w:initials="JE">'
+        + "<w:p><w:r><w:t>Check the figures</w:t></w:r></w:p></w:comment></w:comments>"
+    )
+    settings = (
+        XML_HEAD
+        + f'<w:settings {W_NS}><w:rsids><w:rsidRoot w:val="00A1B2C3"/>'
+        + '<w:rsid w:val="00A1B2C3"/><w:rsid w:val="00D4E5F6"/></w:rsids></w:settings>'
+    )
+    people = (
+        XML_HEAD
+        + '<w15:people xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">'
+        + f'<w15:person w15:author="{ARTIST}"><w15:presenceInfo w15:providerId="AD" w15:userId="{USER_ID}"/></w15:person>'
+        + "</w15:people>"
+    )
+    doc_rels = rels(
+        (f"{REL}/image", "media/image1.jpeg"),
+        (f"{REL}/comments", "comments.xml"),
+        (f"{REL}/settings", "settings.xml"),
+        ("http://schemas.microsoft.com/office/2011/relationships/people", "people.xml"),
+    )
+    wml = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+    main = override("word/document.xml", f"{wml}.document.main+xml")
+    extra = (
+        override("word/comments.xml", f"{wml}.comments+xml")
+        + override("word/settings.xml", f"{wml}.settings+xml")
+        + override("word/people.xml", f"{wml}.people+xml")
+    )
     return write_zip(
         [
-            ("[Content_Types].xml", content_types(main)),
+            ("[Content_Types].xml", content_types(main, extra)),
             ("_rels/.rels", ROOT_RELS.format(main="word/document.xml")),
             ("word/document.xml", document),
             ("word/_rels/document.xml.rels", doc_rels),
+            ("word/comments.xml", comments),
+            ("word/settings.xml", settings),
+            ("word/people.xml", people),
             ("word/media/image1.jpeg", jpeg),
             ("docProps/core.xml", CORE_XML),
             ("docProps/app.xml", APP_XML),
@@ -378,15 +441,59 @@ def make_docx(jpeg):
     )
 
 
+SML = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+
+VML_NOTE = """<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype><v:shape id="_x0000_s1025" type="#_x0000_t202" style="position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:108pt;height:59.25pt;z-index:1;visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto"><v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/><v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox><x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>1, 15, 0, 2, 3, 15, 3, 16</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape></xml>"""
+
+
 def make_xlsx():
-    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"""
-    wb_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"""
-    sheet = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>42</v></c></row></sheetData></worksheet>"""
-    main = '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-    extra = '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+    # absPath records the folder the workbook was last saved in, which on
+    # Windows usually includes the user's account name.
+    workbook = (
+        XML_HEAD
+        + f"<workbook {SML} {R_NS}"
+        + ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x15"'
+        + ' xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">'
+        + '<mc:AlternateContent><mc:Choice Requires="x15">'
+        + '<x15ac:absPath xmlns:x15ac="http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac"'
+        + f' url="C:\\Users\\{ARTIST}\\Documents\\"/></mc:Choice></mc:AlternateContent>'
+        + '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    )
+    wb_rels = rels(
+        (f"{REL}/worksheet", "worksheets/sheet1.xml"),
+        ("http://schemas.microsoft.com/office/2017/10/relationships/person", "persons/person.xml"),
+    )
+    sheet = (
+        XML_HEAD
+        + f"<worksheet {SML} {R_NS}><sheetData><row r=\"1\"><c r=\"A1\"><v>42</v></c></row></sheetData>"
+        + '<legacyDrawing r:id="rId2"/></worksheet>'
+    )
+    sheet_rels = rels(
+        (f"{REL}/comments", "../comments1.xml"),
+        (f"{REL}/vmlDrawing", "../drawings/vmlDrawing1.vml"),
+    )
+    # Excel prefixes note text with the author's name in bold.
+    comments = (
+        XML_HEAD
+        + f"<comments {SML}><authors><author>{ARTIST}</author></authors>"
+        + '<commentList><comment ref="A1" authorId="0"><text>'
+        + f"<r><rPr><b/></rPr><t>{ARTIST}:</t></r><r><t xml:space=\"preserve\">\nCheck this total</t></r>"
+        + "</text></comment></commentList></comments>"
+    )
+    persons = (
+        XML_HEAD
+        + '<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">'
+        + f'<person displayName="{ARTIST}" id="{{6C1F3C2E-1D5B-4F5E-9C1A-0A1B2C3D4E5F}}"'
+        + f' userId="{USER_ID}" providerId="AD"/></personList>'
+    )
+    sml = "application/vnd.openxmlformats-officedocument.spreadsheetml"
+    main = override("xl/workbook.xml", f"{sml}.sheet.main+xml")
+    extra = (
+        override("xl/worksheets/sheet1.xml", f"{sml}.worksheet+xml")
+        + override("xl/comments1.xml", f"{sml}.comments+xml")
+        + override("xl/persons/person.xml", "application/vnd.ms-excel.person+xml")
+        + '<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>'
+    )
     return write_zip(
         [
             ("[Content_Types].xml", content_types(main, extra)),
@@ -394,6 +501,10 @@ def make_xlsx():
             ("xl/workbook.xml", workbook),
             ("xl/_rels/workbook.xml.rels", wb_rels),
             ("xl/worksheets/sheet1.xml", sheet),
+            ("xl/worksheets/_rels/sheet1.xml.rels", sheet_rels),
+            ("xl/comments1.xml", comments),
+            ("xl/drawings/vmlDrawing1.vml", VML_NOTE),
+            ("xl/persons/person.xml", persons),
             ("docProps/core.xml", CORE_XML),
             ("docProps/app.xml", APP_XML),
             ("docProps/custom.xml", CUSTOM_XML),
@@ -401,16 +512,144 @@ def make_xlsx():
     )
 
 
+PML_NS = (
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    + R_NS
+    + ' xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+)
+EMPTY_TREE = (
+    '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>'
+)
+
+
+def theme_xml():
+    colours = [
+        ("dk1", '<a:sysClr val="windowText" lastClr="000000"/>'),
+        ("lt1", '<a:sysClr val="window" lastClr="FFFFFF"/>'),
+        ("dk2", '<a:srgbClr val="44546A"/>'),
+        ("lt2", '<a:srgbClr val="E7E6E6"/>'),
+        ("accent1", '<a:srgbClr val="4472C4"/>'),
+        ("accent2", '<a:srgbClr val="ED7D31"/>'),
+        ("accent3", '<a:srgbClr val="A5A5A5"/>'),
+        ("accent4", '<a:srgbClr val="FFC000"/>'),
+        ("accent5", '<a:srgbClr val="5B9BD5"/>'),
+        ("accent6", '<a:srgbClr val="70AD47"/>'),
+        ("hlink", '<a:srgbClr val="0563C1"/>'),
+        ("folHlink", '<a:srgbClr val="954F72"/>'),
+    ]
+    scheme = "".join(f"<a:{name}>{value}</a:{name}>" for name, value in colours)
+    fill = '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    line = f'<a:ln w="6350">{fill}</a:ln>'
+    font = '<a:latin typeface="{}"/><a:ea typeface=""/><a:cs typeface=""/>'
+    return (
+        XML_HEAD
+        + '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office">'
+        + f'<a:themeElements><a:clrScheme name="Office">{scheme}</a:clrScheme>'
+        + '<a:fontScheme name="Office">'
+        + f"<a:majorFont>{font.format('Calibri Light')}</a:majorFont>"
+        + f"<a:minorFont>{font.format('Calibri')}</a:minorFont></a:fontScheme>"
+        + '<a:fmtScheme name="Office">'
+        + f"<a:fillStyleLst>{fill * 3}</a:fillStyleLst>"
+        + f"<a:lnStyleLst>{line * 3}</a:lnStyleLst>"
+        + f"<a:effectStyleLst>{'<a:effectStyle><a:effectLst/></a:effectStyle>' * 3}</a:effectStyleLst>"
+        + f"<a:bgFillStyleLst>{fill * 3}</a:bgFillStyleLst>"
+        + "</a:fmtScheme></a:themeElements></a:theme>"
+    )
+
+
 def make_pptx():
-    # Only the parts metascrub reads; not a presentation PowerPoint will open.
-    presentation = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>"""
-    main = '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+    presentation = (
+        XML_HEAD
+        + f'<p:presentation {PML_NS}>'
+        + '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'
+        + '<p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst>'
+        + '<p:sldSz cx="9144000" cy="6858000"/><p:notesSz cx="6858000" cy="9144000"/>'
+        + "</p:presentation>"
+    )
+    master = (
+        XML_HEAD
+        + f"<p:sldMaster {PML_NS}><p:cSld><p:spTree>{EMPTY_TREE}</p:spTree></p:cSld>"
+        + '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2"'
+        + ' accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6"'
+        + ' hlink="hlink" folHlink="folHlink"/>'
+        + '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>'
+        + "</p:sldMaster>"
+    )
+    layout = (
+        XML_HEAD
+        + f'<p:sldLayout {PML_NS} type="blank" preserve="1">'
+        + f'<p:cSld name="Blank"><p:spTree>{EMPTY_TREE}</p:spTree></p:cSld>'
+        + "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"
+    )
+    slide = (
+        XML_HEAD
+        + f"<p:sld {PML_NS}><p:cSld><p:spTree>{EMPTY_TREE}"
+        + '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>'
+        + '<p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="7315200" cy="914400"/></a:xfrm>'
+        + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+        + '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="4000"/>'
+        + "<a:t>Quarterly deck</a:t></a:r></a:p></p:txBody></p:sp>"
+        + "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
+    )
+    authors = (
+        XML_HEAD
+        + '<p:cmAuthorLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+        + f'<p:cmAuthor id="0" name="{ARTIST}" initials="JE" lastIdx="1" clrIdx="0"/></p:cmAuthorLst>'
+    )
+    comments = (
+        XML_HEAD
+        + '<p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+        + '<p:cm authorId="0" dt="2019-07-14T10:30:00.000" idx="1"><p:pos x="10" y="10"/>'
+        + "<p:text>Tighten this title</p:text></p:cm></p:cmLst>"
+    )
+    pml = "application/vnd.openxmlformats-officedocument.presentationml"
+    main = override("ppt/presentation.xml", f"{pml}.presentation.main+xml")
+    extra = (
+        override("ppt/slideMasters/slideMaster1.xml", f"{pml}.slideMaster+xml")
+        + override("ppt/slideLayouts/slideLayout1.xml", f"{pml}.slideLayout+xml")
+        + override("ppt/slides/slide1.xml", f"{pml}.slide+xml")
+        + override("ppt/theme/theme1.xml", "application/vnd.openxmlformats-officedocument.theme+xml")
+        + override("ppt/commentAuthors.xml", f"{pml}.commentAuthors+xml")
+        + override("ppt/comments/comment1.xml", f"{pml}.comments+xml")
+    )
     return write_zip(
         [
-            ("[Content_Types].xml", content_types(main)),
+            ("[Content_Types].xml", content_types(main, extra)),
             ("_rels/.rels", ROOT_RELS.format(main="ppt/presentation.xml")),
             ("ppt/presentation.xml", presentation),
+            (
+                "ppt/_rels/presentation.xml.rels",
+                rels(
+                    (f"{REL}/slideMaster", "slideMasters/slideMaster1.xml"),
+                    (f"{REL}/slide", "slides/slide1.xml"),
+                    (f"{REL}/theme", "theme/theme1.xml"),
+                    (f"{REL}/commentAuthors", "commentAuthors.xml"),
+                ),
+            ),
+            ("ppt/slideMasters/slideMaster1.xml", master),
+            (
+                "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+                rels(
+                    (f"{REL}/slideLayout", "../slideLayouts/slideLayout1.xml"),
+                    (f"{REL}/theme", "../theme/theme1.xml"),
+                ),
+            ),
+            ("ppt/slideLayouts/slideLayout1.xml", layout),
+            (
+                "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
+                rels((f"{REL}/slideMaster", "../slideMasters/slideMaster1.xml")),
+            ),
+            ("ppt/slides/slide1.xml", slide),
+            (
+                "ppt/slides/_rels/slide1.xml.rels",
+                rels(
+                    (f"{REL}/slideLayout", "../slideLayouts/slideLayout1.xml"),
+                    (f"{REL}/comments", "../comments/comment1.xml"),
+                ),
+            ),
+            ("ppt/theme/theme1.xml", theme_xml()),
+            ("ppt/commentAuthors.xml", authors),
+            ("ppt/comments/comment1.xml", comments),
             ("docProps/core.xml", CORE_XML),
             ("docProps/app.xml", APP_XML),
             ("docProps/custom.xml", CUSTOM_XML),

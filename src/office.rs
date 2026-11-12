@@ -16,6 +16,7 @@ use quick_xml::events::Event;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
+use crate::office_content;
 use crate::report::{Category, Removals};
 use crate::{
     Cleaned, Field, Inspection, MAX_INFLATE, OfficeKind, clean_as, detect_image, inspect_as,
@@ -174,6 +175,9 @@ pub fn inspect(data: &[u8]) -> Result<Inspection> {
                     f.with_category(category)
                 },
             )),
+            name if office_content::handles(name) => {
+                fields.extend(office_content::process(name, &entry.content).fields);
+            }
             name => {
                 if let Some(format) = detect_image(&entry.content) {
                     match inspect_as(format, &entry.content) {
@@ -211,6 +215,7 @@ pub fn clean(data: &[u8]) -> Result<Cleaned> {
     let mut removed = Removals::default();
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     let mut timestamps = false;
+    let mut content_parts = 0usize;
 
     for entry in &entries {
         timestamps |= entry.modified.is_some_and(|t| t != DateTime::default());
@@ -252,11 +257,26 @@ pub fn clean(data: &[u8]) -> Result<Cleaned> {
                     }
                     cleaned.data
                 }
-                None => entry.content.clone(),
+                None => match office_content::process(&entry.name, &entry.content).cleaned {
+                    Some(cleaned) => {
+                        content_parts += 1;
+                        cleaned
+                    }
+                    None => entry.content.clone(),
+                },
             },
         };
         writer.start_file(entry.name.as_str(), options)?;
         writer.write_all(&content)?;
+    }
+    if content_parts > 0 {
+        removed.add(
+            format!(
+                "comment and revision authors, dates and IDs ({content_parts} part{})",
+                if content_parts == 1 { "" } else { "s" }
+            ),
+            0,
+        );
     }
     if timestamps {
         removed.add("ZIP entry timestamps", 0);
