@@ -29,3 +29,18 @@ fn rejects_unsupported_content() {
     assert_eq!(detect(b"\0\0\0\x18ftypisom\0\0\x02\0isommp41"), None);
     assert_eq!(metascrub::describe_unsupported(b"GIF89a"), "GIF image");
 }
+
+#[test]
+fn formats_have_short_display_names() {
+    let names: Vec<String> = [
+        Format::Jpeg,
+        Format::Heif,
+        Format::Office(OfficeKind::Word),
+        Format::Office(OfficeKind::Excel),
+        Format::Office(OfficeKind::PowerPoint),
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    assert_eq!(names, ["JPEG", "HEIF", "DOCX", "XLSX", "PPTX"]);
+}
