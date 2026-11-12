@@ -8,6 +8,7 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use metascrub::{Category, Field};
+use serde::Serialize;
 
 const ABOUT: &str = "Inspect and strip identifying metadata from files before sharing them";
 
@@ -35,6 +36,10 @@ enum Command {
         /// Only show privacy-sensitive fields
         #[arg(short, long)]
         sensitive: bool,
+
+        /// Print a JSON report instead of text
+        #[arg(long)]
+        json: bool,
 
         /// Files or directories to inspect (directories are searched recursively)
         #[arg(required = true)]
@@ -65,6 +70,10 @@ enum Command {
         /// List every removed field and its value
         #[arg(short, long)]
         verbose: bool,
+
+        /// Print a JSON report instead of text; errors are reported in it
+        #[arg(long)]
+        json: bool,
 
         /// Files or directories to clean (directories are searched recursively)
         #[arg(required = true)]
@@ -109,13 +118,18 @@ fn main() -> ExitCode {
     });
 
     let ok = match cli.command {
-        Command::Inspect { sensitive, paths } => run_inspect(&paths, sensitive),
+        Command::Inspect {
+            sensitive,
+            json,
+            paths,
+        } => run_inspect(&paths, sensitive, json),
         Command::Clean {
             out_dir,
             in_place,
             dry_run,
             force,
             verbose,
+            json,
             paths,
         } => {
             let mode = match (&out_dir, in_place) {
@@ -129,6 +143,7 @@ fn main() -> ExitCode {
                 dry_run,
                 force,
                 verbose,
+                json,
             };
             run_clean(&paths, &options)
         }
@@ -148,23 +163,30 @@ fn error(path: &Path, err: &anyhow::Error) {
     );
 }
 
-fn run_inspect(paths: &[PathBuf], sensitive_only: bool) -> bool {
+fn run_inspect(paths: &[PathBuf], sensitive_only: bool, json: bool) -> bool {
     let mut ok = true;
     let mut first = true;
+    let mut records = Vec::new();
     for input in collect_inputs(paths, false, &mut ok) {
-        let data = match fs::read(&input.path) {
-            Ok(data) => data,
-            Err(e) => {
-                error(&input.path, &e.into());
-                ok = false;
-                continue;
+        let result = fs::read(&input.path)
+            .context("cannot read file")
+            .and_then(|data| {
+                if !input.explicit && metascrub::detect(&data).is_none() {
+                    return Ok(None);
+                }
+                metascrub::inspect(&data).map(Some)
+            });
+        match result {
+            Ok(None) => {}
+            Ok(Some((format, inspection))) if json => {
+                records.push(JsonInspection::new(
+                    &input.path,
+                    format,
+                    &inspection,
+                    sensitive_only,
+                ));
             }
-        };
-        if !input.explicit && metascrub::detect(&data).is_none() {
-            continue;
-        }
-        match metascrub::inspect(&data) {
-            Ok((format, inspection)) => {
+            Ok(Some((format, inspection))) => {
                 if !first {
                     anstream::println!();
                 }
@@ -172,10 +194,17 @@ fn run_inspect(paths: &[PathBuf], sensitive_only: bool) -> bool {
                 print_inspection(&input.path, format, &inspection, sensitive_only);
             }
             Err(e) => {
-                error(&input.path, &e);
                 ok = false;
+                if json {
+                    records.push(JsonInspection::error(&input.path, &e));
+                } else {
+                    error(&input.path, &e);
+                }
             }
         }
+    }
+    if json {
+        print_json(&records);
     }
     ok
 }
@@ -260,6 +289,7 @@ struct CleanOptions {
     dry_run: bool,
     force: bool,
     verbose: bool,
+    json: bool,
 }
 
 fn run_clean(paths: &[PathBuf], options: &CleanOptions) -> bool {
@@ -267,18 +297,37 @@ fn run_clean(paths: &[PathBuf], options: &CleanOptions) -> bool {
     let inputs = collect_inputs(paths, options.mode == Mode::Copy, &mut ok);
     let mut planned = HashSet::new();
     let (mut cleaned, mut failed, mut skipped) = (0usize, 0usize, 0usize);
+    let mut records = Vec::new();
 
     for input in &inputs {
         match clean_one(input, options, &mut planned) {
-            Ok(true) => cleaned += 1,
-            Ok(false) => skipped += 1,
+            Ok(Some((target, report))) => {
+                cleaned += 1;
+                if options.json {
+                    records.push(JsonClean::cleaned(input, &target, &report, options.dry_run));
+                } else {
+                    print_clean(input, &target, &report, options);
+                }
+            }
+            Ok(None) => {
+                skipped += 1;
+                if options.json {
+                    records.push(JsonClean::skipped(input));
+                }
+            }
             Err(e) => {
-                error(&input.path, &e);
                 failed += 1;
+                if options.json {
+                    records.push(JsonClean::error(input, &e));
+                } else {
+                    error(&input.path, &e);
+                }
             }
         }
     }
-    if inputs.len() > 1 || skipped > 0 {
+    if options.json {
+        print_json(&records);
+    } else if inputs.len() > 1 || skipped > 0 {
         let verb = if options.dry_run {
             "would clean"
         } else {
@@ -296,16 +345,17 @@ fn run_clean(paths: &[PathBuf], options: &CleanOptions) -> bool {
     ok && failed == 0
 }
 
-/// Clean one input. Returns `Ok(false)` when a file found during a directory
-/// walk is skipped because its format is unsupported.
+/// Clean one input and return where it was (or would be) written. Returns
+/// `Ok(None)` when a file found during a directory walk is skipped because
+/// its format is unsupported.
 fn clean_one(
     input: &Input,
     options: &CleanOptions,
     planned: &mut HashSet<PathBuf>,
-) -> Result<bool> {
+) -> Result<Option<(PathBuf, metascrub::CleanReport)>> {
     let data = fs::read(&input.path).context("cannot read file")?;
     if !input.explicit && metascrub::detect(&data).is_none() {
-        return Ok(false);
+        return Ok(None);
     }
     let report = metascrub::clean(&data)?;
     let target = output_path(input, options)?;
@@ -328,8 +378,7 @@ fn clean_one(
     if !options.dry_run {
         write_atomically(&input.path, &target, &report.data)?;
     }
-    print_clean(input, &target, &report, options);
-    Ok(true)
+    Ok(Some((target, report)))
 }
 
 fn print_clean(
@@ -571,6 +620,130 @@ fn sanitize(text: &str, max_chars: usize) -> String {
         }
     }
     out
+}
+
+/// Machine-readable output. Values are emitted verbatim (JSON escaping
+/// makes them safe), and paths are as given on the command line.
+#[derive(Serialize)]
+struct JsonField {
+    group: String,
+    name: String,
+    value: String,
+    category: Option<&'static str>,
+}
+
+impl From<&Field> for JsonField {
+    fn from(field: &Field) -> Self {
+        JsonField {
+            group: field.group.clone(),
+            name: field.name.clone(),
+            value: field.value.clone(),
+            category: field.category.map(Category::label),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JsonInspection {
+    path: String,
+    format: Option<String>,
+    fields: Vec<JsonField>,
+    notes: Vec<String>,
+    error: Option<String>,
+}
+
+impl JsonInspection {
+    fn new(
+        path: &Path,
+        format: metascrub::Format,
+        inspection: &metascrub::Inspection,
+        sensitive_only: bool,
+    ) -> Self {
+        JsonInspection {
+            path: path.display().to_string(),
+            format: Some(format.to_string()),
+            fields: inspection
+                .fields
+                .iter()
+                .filter(|f| !sensitive_only || f.is_sensitive())
+                .map(JsonField::from)
+                .collect(),
+            notes: inspection.notes.clone(),
+            error: None,
+        }
+    }
+
+    fn error(path: &Path, err: &anyhow::Error) -> Self {
+        JsonInspection {
+            path: path.display().to_string(),
+            format: None,
+            fields: Vec::new(),
+            notes: Vec::new(),
+            error: Some(format!("{err:#}")),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JsonClean {
+    input: String,
+    /// `cleaned`, `would_clean` (dry run), `skipped` (unsupported file
+    /// found in a directory) or `error`.
+    status: &'static str,
+    output: Option<String>,
+    format: Option<String>,
+    removed: Vec<String>,
+    kept: Vec<String>,
+    removed_fields: Vec<JsonField>,
+    error: Option<String>,
+}
+
+impl JsonClean {
+    fn empty(input: &Input, status: &'static str) -> Self {
+        JsonClean {
+            input: input.path.display().to_string(),
+            status,
+            output: None,
+            format: None,
+            removed: Vec::new(),
+            kept: Vec::new(),
+            removed_fields: Vec::new(),
+            error: None,
+        }
+    }
+
+    fn cleaned(
+        input: &Input,
+        target: &Path,
+        report: &metascrub::CleanReport,
+        dry_run: bool,
+    ) -> Self {
+        JsonClean {
+            output: Some(target.display().to_string()),
+            format: Some(report.format.to_string()),
+            removed: report.removed.clone(),
+            kept: report.kept.clone(),
+            removed_fields: report.removed_fields.iter().map(JsonField::from).collect(),
+            ..JsonClean::empty(input, if dry_run { "would_clean" } else { "cleaned" })
+        }
+    }
+
+    fn skipped(input: &Input) -> Self {
+        JsonClean::empty(input, "skipped")
+    }
+
+    fn error(input: &Input, err: &anyhow::Error) -> Self {
+        JsonClean {
+            error: Some(format!("{err:#}")),
+            ..JsonClean::empty(input, "error")
+        }
+    }
+}
+
+fn print_json<T: Serialize>(records: &[T]) {
+    let json = serde_json::to_string_pretty(records).expect("report serialises");
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{json}");
 }
 
 #[cfg(test)]

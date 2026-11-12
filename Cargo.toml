@@ -20,6 +20,8 @@ flate2 = "1.1.11"
 kamadak-exif = "0.6.2"
 lopdf = { version = "0.47.0", default-features = false }
 quick-xml = "0.42.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
