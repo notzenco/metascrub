@@ -181,6 +181,7 @@ pub struct Cleaned {
 pub struct Removals(Vec<(String, usize, usize)>);
 
 impl Removals {
+    /// Record a removed block; a `size` of 0 means the size is not meaningful.
     pub fn add(&mut self, label: impl Into<String>, size: usize) {
         let label = label.into();
         match self.0.iter_mut().find(|(l, _, _)| *l == label) {
@@ -195,9 +196,11 @@ impl Removals {
     pub fn into_vec(self) -> Vec<String> {
         self.0
             .into_iter()
-            .map(|(label, count, size)| match count {
-                1 => format!("{label} ({})", bytes(size)),
-                n => format!("{label} ×{n} ({})", bytes(size)),
+            .map(|(label, count, size)| match (count, size) {
+                (1, 0) => label,
+                (n, 0) => format!("{label} ×{n}"),
+                (1, size) => format!("{label} ({})", bytes(size)),
+                (n, size) => format!("{label} ×{n} ({})", bytes(size)),
             })
             .collect()
     }

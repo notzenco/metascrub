@@ -307,6 +307,26 @@ def make_pdf(jpeg):
         len(objects) + 1,
         xref,
     )
+    # An incremental update replaces the Info dictionary. The first
+    # revision, including its Company entry, stays in the file body where
+    # naive tools leave it.
+    info_offset = len(out)
+    out += (
+        "8 0 obj\n<< /Title (Quarterly report v2) /Author "
+        + pdf_string(ARTIST)
+        + " /Creator "
+        + pdf_string(SOFTWARE)
+        + " /Producer "
+        + pdf_string(MAKE + " PDF Library")
+        + " /CreationDate (D:20190714103000Z) /ModDate (D:20190715090000Z) >>\nendobj\n"
+    ).encode()
+    update_xref = len(out)
+    out += b"xref\n0 1\n0000000000 65535 f \n8 1\n%010d 00000 n \n" % info_offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R /Info 8 0 R /Prev %d >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+        update_xref,
+    )
     return bytes(out)
 
 
