@@ -1,0 +1,31 @@
+[package]
+name = "metascrub"
+version = "0.1.0"
+edition = "2024"
+description = "Inspect and strip identifying metadata (EXIF, GPS, XMP, document authors) from files before sharing them"
+license = "MIT"
+repository = "https://github.com/notzenco/metascrub"
+readme = "README.md"
+keywords = ["metadata", "exif", "privacy", "gps", "scrub"]
+categories = ["command-line-utilities", "multimedia::images"]
+exclude = ["/.github", "/tests/fixtures/generate.py"]
+
+[dependencies]
+anstream = "1.0.0"
+anstyle = "1.0.14"
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
+flate2 = "1.1.11"
+kamadak-exif = "0.6.2"
+lopdf = { version = "0.47.0", default-features = false }
+quick-xml = "0.42.0"
+zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+tempfile = "3.27.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
