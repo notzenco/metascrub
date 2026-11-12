@@ -241,8 +241,9 @@ fn print_inspection(
         .count();
     let _ = writeln!(
         out,
-        "  {DIM}{} fields, {sensitive} privacy-sensitive{DIM:#}",
-        inspection.fields.len()
+        "  {DIM}{} field{}, {sensitive} privacy-sensitive{DIM:#}",
+        inspection.fields.len(),
+        plural(inspection.fields.len())
     );
 }
 
@@ -404,7 +405,7 @@ fn print_clean(
         }
         let _ = writeln!(
             out,
-            "  {} privacy-sensitive field{}: {list}",
+            "  {} privacy-sensitive field{} removed: {list}",
             sensitive.len(),
             plural(sensitive.len())
         );

@@ -112,6 +112,7 @@ pub fn classify(name: &str) -> Option<Category> {
         "appversion",
         "hostcomputer",
         "firmware",
+        "program",
         "template",
         "camera",
         "device",
@@ -173,6 +174,33 @@ pub struct Cleaned {
     pub removed: Vec<String>,
     /// Metadata that was deliberately kept, with the reason implied by its name.
     pub kept: Vec<String>,
+}
+
+/// Collects removed blocks, merging repeats into one entry with a count.
+#[derive(Debug, Default)]
+pub struct Removals(Vec<(String, usize, usize)>);
+
+impl Removals {
+    pub fn add(&mut self, label: impl Into<String>, size: usize) {
+        let label = label.into();
+        match self.0.iter_mut().find(|(l, _, _)| *l == label) {
+            Some((_, count, total)) => {
+                *count += 1;
+                *total += size;
+            }
+            None => self.0.push((label, 1, size)),
+        }
+    }
+
+    pub fn into_vec(self) -> Vec<String> {
+        self.0
+            .into_iter()
+            .map(|(label, count, size)| match count {
+                1 => format!("{label} ({})", bytes(size)),
+                n => format!("{label} ×{n} ({})", bytes(size)),
+            })
+            .collect()
+    }
 }
 
 /// Format a byte count for humans.
