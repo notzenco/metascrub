@@ -149,6 +149,17 @@ pub fn inspect(data: &[u8]) -> Result<Inspection> {
         if dict.has(b"PieceInfo") {
             piece_info += 1;
         }
+        let group = format!("annotation object {}", id.0);
+        for key in annotation_keys(dict) {
+            if let Ok(value) = dict.get(key) {
+                let name = match *key {
+                    b"T" => "Author",
+                    b"M" => "ModDate",
+                    _ => "CreationDate",
+                };
+                fields.push(Field::new(group.as_str(), name, text(value)));
+            }
+        }
         if let Some(stream) = stream.filter(|s| is_jpeg(s)) {
             let container = format!("image object {}", id.0);
             match jpeg::inspect(&stream.content) {
@@ -174,12 +185,33 @@ pub fn inspect(data: &[u8]) -> Result<Inspection> {
     Ok(Inspection { fields, notes })
 }
 
-/// Remove [`STRIPPED_KEYS`] from a dictionary and any dictionaries nested in it.
+/// Keys of an annotation that record who made it and when. On form field
+/// widgets /T is the field name, which forms need, so only dates go.
+fn annotation_keys(dict: &Dictionary) -> &'static [&'static [u8]] {
+    if !dict.has(b"Rect") {
+        return &[];
+    }
+    match dict.get(b"Subtype") {
+        Ok(Object::Name(subtype)) if subtype == b"Widget" => &[b"M", b"CreationDate"],
+        Ok(Object::Name(_)) => &[b"T", b"M", b"CreationDate"],
+        _ => &[],
+    }
+}
+
+/// Remove [`STRIPPED_KEYS`] and annotation authors and dates from a
+/// dictionary and any dictionaries nested in it.
 fn strip(dict: &mut Dictionary, removed: &mut Removals) {
     for key in STRIPPED_KEYS {
         if dict.remove(key).is_some() && key == b"PieceInfo" {
             removed.add("application private data", 0);
         }
+    }
+    let mut annotation = false;
+    for key in annotation_keys(dict) {
+        annotation |= dict.remove(key).is_some();
+    }
+    if annotation {
+        removed.add("annotation authors and dates", 0);
     }
     for (_, value) in dict.iter_mut() {
         strip_object(value, removed);

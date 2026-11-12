@@ -270,10 +270,11 @@ def make_pdf(jpeg):
     xmp = xmp_packet()
     content = b"BT /F1 12 Tf 20 60 Td (Quarterly report) Tj ET q 32 0 0 32 20 10 cm /Im1 Do Q"
     objects = [
-        b"<< /Type /Catalog /Pages 2 0 R /Metadata 6 0 R >>",
+        b"<< /Type /Catalog /Pages 2 0 R /Metadata 6 0 R /AcroForm << /Fields [10 0 R] >> >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R"
-        b" /Resources << /Font << /F1 5 0 R >> /XObject << /Im1 7 0 R >> >> >>",
+        b" /Resources << /Font << /F1 5 0 R >> /XObject << /Im1 7 0 R >> >>"
+        b" /Annots [9 0 R 10 0 R] >>",
         b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         b"<< /Type /Metadata /Subtype /XML /Length %d >>\nstream\n" % len(xmp) + xmp + b"\nendstream",
@@ -293,6 +294,15 @@ def make_pdf(jpeg):
             + pdf_string(COMPANY)
             + " >>"
         ).encode(),
+        # A sticky-note comment: /T is its author.
+        (
+            "<< /Type /Annot /Subtype /Text /Rect [150 60 170 80] /T "
+            + pdf_string(ARTIST)
+            + " /Contents (Check the figures) /M (D:20190714103000Z)"
+            + " /CreationDate (D:20190714103000Z) >>"
+        ).encode(),
+        # A form field: here /T is the field's name and must be kept.
+        b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (total) /V (42) /Rect [20 70 80 90] >>",
     ]
     out = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
     offsets = []

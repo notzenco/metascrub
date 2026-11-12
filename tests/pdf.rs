@@ -71,3 +71,49 @@ fn clean_keeps_page_content_and_image_data() {
     let eoi = sos + find(&original[sos..], &[0xFF, 0xD9]).unwrap();
     assert!(find(&report.data, &original[sos..eoi + 2]).is_some());
 }
+
+#[test]
+fn annotation_authors_and_dates_are_reported_and_removed() {
+    let (_, inspection) = metascrub::inspect(&fixture("report.pdf")).unwrap();
+    let author = inspection
+        .fields
+        .iter()
+        .find(|f| f.group.starts_with("annotation") && f.name == "Author")
+        .unwrap_or_else(|| panic!("{:#?}", inspection.fields));
+    assert_eq!(author.value, "Jane Example");
+    assert_eq!(author.category, Some(Category::Identity));
+    assert!(
+        inspection
+            .fields
+            .iter()
+            .any(|f| f.group == author.group && f.name == "ModDate")
+    );
+
+    let report = metascrub::clean(&fixture("report.pdf")).unwrap();
+    let doc = lopdf::Document::load_mem(&report.data).unwrap();
+    let annotations: Vec<&lopdf::Dictionary> = doc
+        .objects
+        .values()
+        .filter_map(|o| o.as_dict().ok())
+        .filter(|d| d.has(b"Rect"))
+        .collect();
+    assert_eq!(annotations.len(), 2);
+    for annotation in annotations {
+        assert!(!annotation.has(b"M") && !annotation.has(b"CreationDate"));
+        if annotation.get(b"Subtype").unwrap().as_name().unwrap() == b"Widget" {
+            // A form field's /T is its name, which forms need.
+            assert_eq!(annotation.get(b"T").unwrap().as_str().unwrap(), b"total");
+        } else {
+            assert!(!annotation.has(b"T"));
+            assert!(
+                annotation.has(b"Contents"),
+                "comment text is content and stays"
+            );
+        }
+    }
+    assert!(
+        report.removed.iter().any(|r| r.contains("annotation")),
+        "{:?}",
+        report.removed
+    );
+}
