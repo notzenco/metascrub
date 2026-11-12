@@ -9,8 +9,10 @@ Requirements: Python 3 (stdlib only), macOS `sips` (JPEG/HEIC encoding) and
 
     python3 tests/fixtures/generate.py
 
-Every planted value contains one of the markers listed in MARKERS so the tests
-can assert that cleaned output no longer contains them.
+Planted names, devices and identifiers contain one of the strings in MARKERS,
+so the tests can assert that cleaned output no longer contains them. Planted
+dates are checked through `inspect` instead, since a date string alone is not
+distinctive enough to search for.
 """
 
 import io

@@ -81,6 +81,7 @@ cargo install --locked --path .
 ```sh
 metascrub inspect photo.jpg report.pdf    # show metadata, flag sensitive fields
 metascrub inspect --sensitive ~/Desktop   # only sensitive fields, recursively
+metascrub inspect --json photo.jpg        # machine-readable report
 
 metascrub clean photo.jpg                 # writes photo.clean.jpg
 metascrub clean -o shared/ trip/          # cleans a folder into shared/trip/...
@@ -243,6 +244,7 @@ documents that render in Quick Look before and after cleaning.
 
 See [docs/macos-integration.md](docs/macos-integration.md) for the plan to
 bring metascrub to the Finder and the share sheet.
+Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
