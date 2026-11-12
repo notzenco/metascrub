@@ -49,9 +49,9 @@ impl fmt::Display for Format {
             Format::WebP => "WebP",
             Format::Heif => "HEIF",
             Format::Pdf => "PDF",
-            Format::Office(OfficeKind::Word) => "Word document (docx)",
-            Format::Office(OfficeKind::Excel) => "Excel workbook (xlsx)",
-            Format::Office(OfficeKind::PowerPoint) => "PowerPoint presentation (pptx)",
+            Format::Office(OfficeKind::Word) => "DOCX",
+            Format::Office(OfficeKind::Excel) => "XLSX",
+            Format::Office(OfficeKind::PowerPoint) => "PPTX",
             Format::Office(OfficeKind::Other) => "Office Open XML package",
         })
     }
