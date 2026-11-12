@@ -2,6 +2,7 @@
 name = "metascrub"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
 description = "Inspect and strip identifying metadata (EXIF, GPS, XMP, document authors) from files before sharing them"
 license = "MIT"
 repository = "https://github.com/notzenco/metascrub"
