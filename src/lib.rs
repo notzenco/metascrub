@@ -193,3 +193,20 @@ pub(crate) fn be32(data: &[u8], at: usize) -> Option<u32> {
 pub(crate) fn be16(data: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_be_bytes(data.get(at..at + 2)?.try_into().ok()?))
 }
+
+/// Upper bound for any single decompressed buffer, as a guard against
+/// decompression bombs in PNG text chunks, PDF streams and Office archives.
+pub(crate) const MAX_INFLATE: usize = 256 * 1024 * 1024;
+
+/// Inflate zlib data, refusing to produce more than [`MAX_INFLATE`] bytes.
+pub(crate) fn inflate_zlib(data: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::ZlibDecoder::new(data)
+        .take(MAX_INFLATE as u64 + 1)
+        .read_to_end(&mut out)?;
+    if out.len() > MAX_INFLATE {
+        bail!("decompressed data exceeds {}", report::bytes(MAX_INFLATE));
+    }
+    Ok(out)
+}
