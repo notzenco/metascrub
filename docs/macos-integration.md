@@ -70,11 +70,12 @@ A Swift `MetascrubRunner` wraps `Process`:
   batch) and maps exit status 1 to per-file errors;
 - never passes file names through a shell, so names need no quoting.
 
-This needs one CLI addition first, tracked separately: **`--json`**, a
-machine-readable report per file (`input`, `output`, `format`, `removed`,
-`kept`, `removed_fields`, `error`). The extensions show this in their UI
-instead of parsing human-oriented text. It should come with its own tests
-in this repository, and the human output stays the default.
+The CLI's `--json` report provides what the UI needs: one record per file
+with `status` (`cleaned`, `skipped`, `error`), `output`, `format`,
+`removed`, `kept`, `removed_fields` (each with a privacy `category`) and
+`error`. Per-file errors are in the report rather than on stderr, so the
+runner parses a single stream. The extensions decode it with `Codable`
+instead of parsing human-oriented text.
 
 ### Quick Action (Action extension)
 
@@ -144,7 +145,8 @@ in this repository, and the human output stays the default.
 
 ## Milestones
 
-1. CLI: add `--json` with tests. Publish a release with universal macOS binaries.
+1. CLI: publish a release with universal macOS binaries. (`--json`, which
+   the extensions rely on, is done.)
 2. Phase 1 Shortcut, documented in the README.
 3. Host app with the bundled, sandboxed helper and the drop zone.
 4. Quick Action extension.

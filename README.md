@@ -15,6 +15,7 @@ what is there and writes a clean copy without it.
   ones: location, identity, device, time and free text.
 - **Clean** writes cleaned copies by default and only touches originals with
   `--in-place`. It reports what it removed.
+- **Scriptable.** `--json` prints a machine-readable report for both commands.
 - **Lossless.** Image cleaning edits the container (JPEG segments, PNG
   chunks, RIFF chunks, HEIF items) and never decodes or re-encodes pixels.
 - **Verified.** Every cleaned file is inspected again before it is written.
@@ -30,8 +31,8 @@ what is there and writes a clean copy without it.
 | PNG | `eXIf`, `tEXt`, `zTXt` and `iTXt` (including XMP), `tIME`, unknown ancillary chunks, data after `IEND` | Image data (`IDAT`) byte-for-byte, colour, gamma, transparency, physical size and APNG animation chunks, orientation |
 | WebP | `EXIF` and `XMP` chunks, unknown chunks; VP8X flags and RIFF size are corrected | Bitstream, alpha, animation and ICC chunks byte-for-byte, orientation |
 | HEIF (HEIC, AVIF) | EXIF and XMP items, overwritten in place with an empty EXIF block and an empty XMP packet of the same size | Every box, offset and coded image byte |
-| PDF | The Info dictionary (author, creator, producer, dates, custom keys), XMP metadata streams, `/PieceInfo` private data, metadata inside embedded JPEG images, earlier revisions left by incremental updates | Pages, text, fonts and image streams (not re-encoded) |
-| DOCX, XLSX, PPTX | Core properties (author, last editor, dates, title, revision), extended properties (application, company, manager, template, editing time), custom properties, metadata in embedded images, ZIP entry timestamps, the ZIP comment | All other parts with their content and order unchanged |
+| PDF | The Info dictionary (author, creator, producer, dates, custom keys), XMP metadata streams, `/PieceInfo` private data, metadata inside embedded JPEG images, annotation authors and dates, earlier revisions left by incremental updates | Pages, text, fonts and image streams (not re-encoded), annotation text, form field names |
+| DOCX, XLSX, PPTX | Core properties (author, last editor, dates, title, revision), extended properties (application, company, manager, template, editing time), custom properties, metadata in embedded images, ZIP entry timestamps, the ZIP comment. Inside the content: comment and tracked-change authors, initials and signed-in user IDs (replaced with `Author`), comment and revision dates, Word revision session IDs (`rsid`), Excel's last-saved folder path | Comments and tracked changes themselves, and every other part with its content and order unchanged |
 
 ### What metascrub does not remove
 
@@ -39,10 +40,9 @@ Metadata is only part of what a file can reveal. metascrub does **not**:
 
 - change what is *in* a picture or a document: faces, street signs,
   reflections, text in screenshots, or the words of a document;
-- remove names recorded inside document *content*: Office comment and
-  tracked-change authors (`word/comments.xml`, `w:author`), revision IDs
-  (`rsid`), PDF annotation authors, form field values, or text inside
-  embedded OLE objects;
+- remove names that are part of the *text*: a name typed into a document, a
+  comment or a slide stays, as do PDF form field values and the contents of
+  embedded OLE objects (for example a spreadsheet pasted into a document);
 - clean HEIF thumbnails, depth maps or other auxiliary images, HEIF image
   sequences, PDF images other than JPEG (for example JPEG 2000), or the PDF
   document `/ID`;
@@ -97,6 +97,7 @@ metascrub clean --in-place photo.jpg      # replace the original
 | `-f, --force` | Overwrite existing output files |
 | `-v, --verbose` | List every removed field with its value |
 | `-s, --sensitive` | (`inspect`) Show only privacy-sensitive fields |
+| `--json` | Print a JSON report instead of text (see below) |
 | `--color auto\|always\|never` | Colour output; `NO_COLOR` is respected |
 
 Folders are searched recursively. Hidden files and symbolic links inside
@@ -107,6 +108,39 @@ failed.
 
 Metadata values and file names are printed with control characters escaped,
 so a crafted file cannot inject terminal escape sequences.
+
+### JSON output
+
+`--json` prints one JSON array with a record per file. Per-file errors go
+into the report rather than to stderr, and the exit status is the same as
+for text output.
+
+```console
+$ metascrub clean --json -n photo.jpg
+[
+  {
+    "input": "photo.jpg",
+    "status": "would_clean",
+    "output": "photo.clean.jpg",
+    "format": "JPEG",
+    "removed": ["EXIF (388 B)", "XMP (505 B)", "Photoshop/IPTC (48 B)", "comment (18 B)", "data after end of image (13 B)"],
+    "kept": ["ICC colour profile", "orientation"],
+    "removed_fields": [
+      { "group": "EXIF", "name": "Make", "value": "MetascrubCam", "category": "device" },
+      ...
+    ],
+    "error": null
+  }
+]
+```
+
+| Command | Record fields |
+| --- | --- |
+| `inspect` | `path`, `format`, `fields` (`group`, `name`, `value`, `category`), `notes`, `error` |
+| `clean` | `input`, `status` (`cleaned`, `would_clean`, `skipped`, `error`), `output`, `format`, `removed`, `kept`, `removed_fields`, `error` |
+
+`category` is `location`, `identity`, `device`, `time`, `text` or `null` for
+fields that are not privacy-sensitive.
 
 ## Example
 
@@ -147,8 +181,8 @@ photo.jpg → photo.clean.jpg (JPEG)
   kept    ICC colour profile, orientation
   18 privacy-sensitive fields removed: Make, Model, Software, DateTime, Artist, DateTimeOriginal, BodySerialNumber, LensModel and 10 more
 memo.docx → memo.clean.docx (DOCX)
-  removed embedded image metadata (936 B), core properties (725 B), extended properties (442 B), custom properties (377 B), ZIP entry timestamps
-  32 privacy-sensitive fields removed: Make, Model, Software, DateTime, Artist, DateTimeOriginal, BodySerialNumber, LensModel and 23 more
+  removed embedded image metadata (936 B), core properties (725 B), extended properties (442 B), custom properties (377 B), comment and revision authors, dates and IDs (4 parts), ZIP entry timestamps
+  41 privacy-sensitive fields removed: RevisionAuthor, RevisionDate, RevisionSessionIDs, CommentAuthor, CommentDate, CommentInitials, PersonName, PersonUserId and 31 more
 cleaned 2 files
 
 $ metascrub inspect photo.clean.jpg
@@ -179,9 +213,13 @@ every fixture plus hundreds of corrupted variants through `inspect` and
 - **HEIF** locates EXIF and XMP items through the `iinf` and `iloc` boxes and
   overwrites their bytes in place, so no offsets change.
 - **PDF** uses [`lopdf`](https://crates.io/crates/lopdf) to load the current
-  revision, removes metadata keys, cleans embedded JPEGs, prunes
-  unreachable objects and writes a single-revision file.
+  revision, removes metadata keys and annotation authors, cleans embedded
+  JPEGs, prunes unreachable objects and writes a single-revision file.
 - **Office** packages are rewritten entry by entry with fixed timestamps.
+  In comment, revision and people parts only the tags that carry a name,
+  date or ID are rewritten; all other markup is copied byte for byte.
+  Names become `Author` rather than disappearing, so comments and tracked
+  changes still open and can still be accepted or rejected.
 
 EXIF is decoded with [`kamadak-exif`](https://crates.io/crates/kamadak-exif)
 and XML with [`quick-xml`](https://crates.io/crates/quick-xml). Files are
@@ -200,7 +238,8 @@ The fixtures carry known metadata planted by
 library plus macOS `sips` and `cwebp`). The tests check that every planted
 value is reported by `inspect` and absent after `clean`, that image data is
 byte-identical, and that cleaning twice changes nothing. On macOS they also
-decode every cleaned image with `sips`.
+decode every cleaned image with `sips`. The Office fixtures are complete
+documents that render in Quick Look before and after cleaning.
 
 See [docs/macos-integration.md](docs/macos-integration.md) for the plan to
 bring metascrub to the Finder and the share sheet.
